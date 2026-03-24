@@ -97,10 +97,13 @@ class MyApplication : Application() {
 FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
     PushSDK.setDeviceToken(token)
 
-    // memberNo: 회원 ID (비로그인이면 생략 → UUID 자동 생성)
-    PushSDK.register("user123") { success ->
-        Log.d("Push", "등록 결과: $success")
-    }
+    // 비회원(UUID)으로 디바이스 등록 (스마트 비교: 변경 없으면 스킵)
+    PushSDK.register()
+}
+
+// 3. 로그인 후 회원으로 전환
+fun onLoginSuccess(userId: String) {
+    PushSDK.register(userId)
 }
 ```
 
@@ -123,7 +126,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
 |--------|-------------|
 | `PushSDK.configure(context, config)` | SDK 초기화 |
 | `PushSDK.setDeviceToken(token)` | FCM 토큰 설정 |
-| `PushSDK.register(memberNo?)` | 디바이스 등록 (변경 없으면 스킵) |
+| `PushSDK.register(memberNo?)` | 디바이스 등록 |
 | `PushSDK.restoreFromPreferences(context)` | FCM 수신 시 설정 복원 |
 
 ### 알림 설정
@@ -158,10 +161,6 @@ override fun onCreate(savedInstanceState: Bundle?) {
 | `PushSDK.getMemberNo()` | 저장된 memberNo 조회 |
 | `PushSDK.getDeviceId()` | 디바이스 UUID 조회 |
 | `PushSDK.isConfigured` | 초기화 완료 여부 |
-
-## 스마트 등록
-
-`register()` 호출 시 이전 등록 정보(memberNo, token, OS 버전, 앱 버전)와 비교하여 변경이 없으면 서버 호출을 스킵합니다.
 
 ## 미확인 메시지 자동 복구
 

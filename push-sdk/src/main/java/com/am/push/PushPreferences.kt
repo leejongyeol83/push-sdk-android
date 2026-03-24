@@ -18,7 +18,7 @@ internal class PushPreferences(context: Context) {
         private const val KEY_MEMBER_NO = "member_no"
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_API_KEY = "api_key"
-        private const val KEY_LAST_REGISTER = "last_registration"
+        private const val KEY_SERVER_DEVICE_ID = "server_device_id"
         private const val KEY_UNCONFIRMED = "unconfirmed_messages"
     }
 
@@ -45,16 +45,10 @@ internal class PushPreferences(context: Context) {
     fun getSavedServerUrl(): String? = prefs.getString(KEY_SERVER_URL, null)
     fun getSavedApiKey(): String? = prefs.getString(KEY_API_KEY, null)
 
-    fun saveLastRegistration(info: Map<String, String>) {
-        prefs.edit().putString(KEY_LAST_REGISTER, info.entries.joinToString(",") { "${it.key}=${it.value}" }).apply()
-    }
-    fun getLastRegistration(): Map<String, String>? {
-        val raw = prefs.getString(KEY_LAST_REGISTER, null) ?: return null
-        return raw.split(",").associate {
-            val (k, v) = it.split("=", limit = 2)
-            k to v
-        }
-    }
+
+
+    fun saveServerDeviceId(id: String) { prefs.edit().putString(KEY_SERVER_DEVICE_ID, id).apply() }
+    fun getServerDeviceId(): String? = prefs.getString(KEY_SERVER_DEVICE_ID, null)
 
     fun addUnconfirmedMessage(messageId: String) {
         val set = getUnconfirmedMessages().toMutableSet()
