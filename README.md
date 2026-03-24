@@ -83,8 +83,8 @@ class MyApplication : Application() {
 
         // 1. SDK 초기화
         val config = PushConfig(
-            serverUrl = "https://your-platform.com",
             apiKey = "pk_your_api_key",
+            serverUrl = "https://your-platform.com",
             enableLogging = true  // 디버그용
         )
         PushSDK.configure(this, config)
@@ -97,9 +97,9 @@ class MyApplication : Application() {
 FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
     PushSDK.setDeviceToken(token)
 
-    lifecycleScope.launch {
-        // memberNo: 회원 ID (비로그인이면 생략 → UUID 자동 생성)
-        PushSDK.register("user123")
+    // memberNo: 회원 ID (비로그인이면 생략 → UUID 자동 생성)
+    PushSDK.register("user123") { success ->
+        Log.d("Push", "등록 결과: $success")
     }
 }
 ```
@@ -110,9 +110,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
     intent.getStringExtra(PushFirebaseMessagingService.EXTRA_MESSAGE_ID)?.let { messageId ->
-        lifecycleScope.launch {
-            PushSDK.open(messageId)
-        }
+        PushSDK.open(messageId)
     }
 }
 ```

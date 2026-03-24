@@ -2,6 +2,8 @@ package com.am.push
 
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CoroutineScope
@@ -19,12 +21,13 @@ import kotlinx.coroutines.launch
  * val config = PushConfig(apiKey = "pk_...", serverUrl = "https://...")
  * PushSDK.configure(context, config)
  * PushSDK.setDeviceToken(fcmToken)
- * PushSDK.register("user123")
+ * PushSDK.register("user123") { success -> }
  * ```
  */
 object PushSDK {
 
     private const val TAG = "Main"
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     // ── 상태 ──
 
@@ -52,9 +55,6 @@ object PushSDK {
 
     // ── 초기화 ──
 
-    /**
-     * SDK를 초기화한다.
-     */
     fun configure(context: Context, config: PushConfig, enableLogging: Boolean = config.enableLogging) {
         this.context = context.applicationContext
         this.config = config
@@ -62,16 +62,12 @@ object PushSDK {
         this.httpClient = PushHttpClient(config.serverUrl, config.apiKey)
         PushLogger.enabled = enableLogging
 
-        // 설정 저장 (FCM 수신 시 복원용)
         prefs?.saveConfig(config.serverUrl, config.apiKey)
 
         isConfigured = true
         PushLogger.info(TAG, "SDK 초기화 완료 (apiKey: ${config.apiKey.take(10)}...)")
     }
 
-    /**
-     * SharedPreferences에서 설정을 복원한다 (FCM 수신 시 SDK 미초기화 상태 대비).
-     */
     fun restoreFromPreferences(context: Context) {
         val tempPrefs = PushPreferences(context.applicationContext)
         val serverUrl = tempPrefs.getSavedServerUrl() ?: return
@@ -83,28 +79,16 @@ object PushSDK {
 
     // ── 토큰/멤버 관리 ──
 
-    /**
-     * FCM 토큰을 설정한다.
-     */
     fun setDeviceToken(token: String) {
         prefs?.saveDeviceToken(token)
         PushLogger.debug(TAG, "토큰 설정: ${token.take(10)}...")
     }
 
-    /**
-     * 현재 memberNo를 반환한다 (없으면 deviceId).
-     */
     val currentMemberNo: String
         get() = prefs?.getMemberNo() ?: prefs?.getOrCreateDeviceId() ?: ""
 
-    /**
-     * 저장된 memberNo를 반환한다.
-     */
     fun getMemberNo(): String? = prefs?.getMemberNo()
 
-    /**
-     * 디바이스 UUID를 반환한다.
-     */
     fun getDeviceId(): String = prefs?.getOrCreateDeviceId() ?: ""
 
     private fun resolveMemberNo(memberNo: String?): String {
@@ -115,24 +99,31 @@ object PushSDK {
         return currentMemberNo
     }
 
-    // ── 디바이스 등록 ──
+    // ── 디바이스 등록 (콜백) ──
 
     /**
-     * 디바이스를 서버에 등록한다.
-     * 이전 등록 정보와 동일하면 스킵한다 (스마트 비교).
+     * 디바이스를 서버에 등록한다. 변경 없으면 스킵 (스마트 비교).
      */
-    suspend fun register(memberNo: String? = null): Boolean {
-        return internalRegister(memberNo, compare = true)
+    fun register(memberNo: String? = null, callback: ((Boolean) -> Unit)? = null) {
+        sdkScope.launch {
+            val success = internalRegister(memberNo, compare = true)
+            mainHandler.post { callback?.invoke(success) }
+        }
     }
 
     private suspend fun internalRegister(memberNo: String? = null, compare: Boolean = true): Boolean {
-        val client = httpClient ?: throw IllegalStateException("PushSDK.configure()를 먼저 호출하세요")
-        val p = prefs ?: throw IllegalStateException("PushSDK.configure()를 먼저 호출하세요")
+        val client = httpClient ?: run {
+            PushLogger.error(TAG, "configure()를 먼저 호출하세요")
+            return false
+        }
+        val p = prefs ?: return false
+        val token = p.getDeviceToken() ?: run {
+            PushLogger.error(TAG, "setDeviceToken()을 먼저 호출하세요")
+            return false
+        }
+        val ctx = context ?: return false
 
         val resolved = resolveMemberNo(memberNo)
-        val token = p.getDeviceToken() ?: throw IllegalStateException("setDeviceToken()을 먼저 호출하세요")
-        val ctx = context ?: throw IllegalStateException("PushSDK.configure()를 먼저 호출하세요")
-
         val appVersion = try {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "1.0.0"
         } catch (_: Exception) { "1.0.0" }
@@ -146,7 +137,6 @@ object PushSDK {
             "deviceModel" to "${Build.MANUFACTURER} ${Build.MODEL}",
         )
 
-        // 스마트 비교: 이전 등록과 동일하면 스킵
         if (compare) {
             val lastReg = p.getLastRegistration()
             if (lastReg != null && lastReg == regInfo) {
@@ -156,11 +146,7 @@ object PushSDK {
             }
         }
 
-        val result = client.post(
-            EP_REGISTER,
-            regInfo,
-            object : TypeToken<Map<String, Any>>() {},
-        )
+        val result = client.post(EP_REGISTER, regInfo, object : TypeToken<Map<String, Any>>() {})
 
         return when (result) {
             is ApiResult.Success -> {
@@ -180,130 +166,68 @@ object PushSDK {
         }
     }
 
-    // ── 알림 설정 ──
+    // ── 알림 설정 (fire-and-forget) ──
 
-    /**
-     * 전체 푸시 수신 허용/거부.
-     */
-    suspend fun setAllowPush(allow: Boolean) {
-        val client = httpClient ?: return
-        val deviceId = getDeviceId()
-
-        val result = client.post(
-            EP_SETTINGS,
-            mapOf("deviceId" to deviceId, "enabled" to allow),
-            object : TypeToken<Map<String, Any>>() {},
-        )
-
-        when (result) {
-            is ApiResult.Success -> PushLogger.info(TAG, "푸시 설정 변경: enabled=$allow")
-            is ApiResult.Error -> PushLogger.error(TAG, "푸시 설정 실패: ${result.message}")
-            is ApiResult.NetworkError -> PushLogger.error(TAG, "푸시 설정 네트워크 오류: ${result.exception.message}")
+    fun setAllowPush(allow: Boolean) {
+        sdkScope.launch {
+            val client = httpClient ?: return@launch
+            client.post(EP_SETTINGS, mapOf("deviceId" to getDeviceId(), "enabled" to allow), object : TypeToken<Map<String, Any>>() {})
+            PushLogger.info(TAG, "푸시 설정 변경: enabled=$allow")
         }
     }
 
-    /**
-     * 방해금지 시간 설정. startTime/endTime 모두 null이면 해제.
-     */
-    suspend fun setDND(startTime: String? = null, endTime: String? = null) {
-        val client = httpClient ?: return
-        val deviceId = getDeviceId()
-
-        val body = mutableMapOf<String, Any>("deviceId" to deviceId)
-        if (startTime != null) body["startTime"] = startTime
-        if (endTime != null) body["endTime"] = endTime
-
-        val result = client.post(
-            EP_SETTINGS_DND,
-            body,
-            object : TypeToken<Map<String, Any>>() {},
-        )
-
-        when (result) {
-            is ApiResult.Success -> PushLogger.info(TAG, "DND 설정 변경: $startTime ~ $endTime")
-            is ApiResult.Error -> PushLogger.error(TAG, "DND 설정 실패: ${result.message}")
-            is ApiResult.NetworkError -> PushLogger.error(TAG, "DND 설정 네트워크 오류: ${result.exception.message}")
+    fun setDND(startTime: String? = null, endTime: String? = null) {
+        sdkScope.launch {
+            val client = httpClient ?: return@launch
+            val body = mutableMapOf<String, Any>("deviceId" to getDeviceId())
+            if (startTime != null) body["startTime"] = startTime
+            if (endTime != null) body["endTime"] = endTime
+            client.post(EP_SETTINGS_DND, body, object : TypeToken<Map<String, Any>>() {})
+            PushLogger.info(TAG, "DND 설정 변경: $startTime ~ $endTime")
         }
     }
 
-    /**
-     * 메시지 유형별 수신 허용/거부.
-     */
-    suspend fun setAllowType(messageTypeCode: String, enabled: Boolean) {
-        val client = httpClient ?: return
-        val deviceId = getDeviceId()
-
-        val result = client.post(
-            EP_SETTINGS_TYPE,
-            mapOf("deviceId" to deviceId, "messageTypeCode" to messageTypeCode, "enabled" to enabled),
-            object : TypeToken<Map<String, Any>>() {},
-        )
-
-        when (result) {
-            is ApiResult.Success -> PushLogger.info(TAG, "메시지 유형 설정: $messageTypeCode=$enabled")
-            is ApiResult.Error -> PushLogger.error(TAG, "메시지 유형 설정 실패: ${result.message}")
-            is ApiResult.NetworkError -> PushLogger.error(TAG, "메시지 유형 설정 네트워크 오류: ${result.exception.message}")
+    fun setAllowType(messageTypeCode: String, enabled: Boolean) {
+        sdkScope.launch {
+            val client = httpClient ?: return@launch
+            client.post(EP_SETTINGS_TYPE, mapOf("deviceId" to getDeviceId(), "messageTypeCode" to messageTypeCode, "enabled" to enabled), object : TypeToken<Map<String, Any>>() {})
+            PushLogger.info(TAG, "메시지 유형 설정: $messageTypeCode=$enabled")
         }
     }
 
-    // ── 수신/열람 확인 ──
+    // ── 수신/열람 확인 (fire-and-forget) ──
 
-    /**
-     * 수신 확인을 전송한다.
-     */
-    suspend fun sendReceiveConfirm(data: Map<String, String>) {
+    fun sendReceiveConfirm(data: Map<String, String>) {
+        sdkScope.launch {
+            sendReceiveConfirmInternal(data)
+        }
+    }
+
+    internal suspend fun sendReceiveConfirmInternal(data: Map<String, String>) {
         val client = httpClient ?: return
         val messageId = data["messageId"] ?: return
-        val deviceId = getDeviceId()
-
-        client.post(
-            EP_RECEIVED,
-            mapOf("deviceId" to deviceId, "messageId" to messageId),
-            object : TypeToken<Map<String, Any>>() {},
-        )
+        client.post(EP_RECEIVED, mapOf("deviceId" to getDeviceId(), "messageId" to messageId), object : TypeToken<Map<String, Any>>() {})
         PushLogger.debug(TAG, "수신 확인 전송: messageId=$messageId")
     }
 
-    /**
-     * 메시지 열람 확인.
-     */
-    suspend fun open(messageId: String) {
-        val client = httpClient ?: return
-        val deviceId = getDeviceId()
-
-        client.post(
-            EP_OPENED,
-            mapOf("deviceId" to deviceId, "messageId" to messageId),
-            object : TypeToken<Map<String, Any>>() {},
-        )
-        PushLogger.debug(TAG, "열람 확인 전송: messageId=$messageId")
-    }
-
-    /**
-     * 전체 메시지 열람 처리.
-     */
-    suspend fun openAll() {
-        val client = httpClient ?: return
-        val deviceId = getDeviceId()
-
-        val result = client.post(
-            EP_OPENED_ALL,
-            mapOf("deviceId" to deviceId),
-            object : TypeToken<Map<String, Any>>() {},
-        )
-
-        when (result) {
-            is ApiResult.Success -> PushLogger.info(TAG, "전체 열람 처리 완료")
-            is ApiResult.Error -> PushLogger.error(TAG, "전체 열람 실패: ${result.message}")
-            is ApiResult.NetworkError -> PushLogger.error(TAG, "전체 열람 네트워크 오류: ${result.exception.message}")
+    fun open(messageId: String) {
+        sdkScope.launch {
+            val client = httpClient ?: return@launch
+            client.post(EP_OPENED, mapOf("deviceId" to getDeviceId(), "messageId" to messageId), object : TypeToken<Map<String, Any>>() {})
+            PushLogger.debug(TAG, "열람 확인 전송: messageId=$messageId")
         }
     }
 
-    // ── 조회 API ──
+    fun openAll() {
+        sdkScope.launch {
+            val client = httpClient ?: return@launch
+            client.post(EP_OPENED_ALL, mapOf("deviceId" to getDeviceId()), object : TypeToken<Map<String, Any>>() {})
+            PushLogger.info(TAG, "전체 열람 처리 완료")
+        }
+    }
 
-    /**
-     * 메시지함을 조회한다.
-     */
+    // ── 조회 API (콜백) ──
+
     data class InboxResponse(
         val messages: List<PushMessage>,
         val page: Int,
@@ -312,110 +236,91 @@ object PushSDK {
         val hasMore: Boolean,
     )
 
-    suspend fun getInbox(page: Int = 1, size: Int = 20): InboxResponse {
-        val client = httpClient ?: return InboxResponse(emptyList(), page, size, 0, false)
-        val deviceId = getDeviceId()
+    fun getInbox(page: Int = 1, size: Int = 20, callback: (InboxResponse) -> Unit) {
+        sdkScope.launch {
+            val client = httpClient ?: run {
+                mainHandler.post { callback(InboxResponse(emptyList(), page, size, 0, false)) }
+                return@launch
+            }
+            val result = client.get(EP_INBOX, mapOf("deviceId" to getDeviceId(), "page" to page.toString(), "size" to size.toString()), object : TypeToken<Map<String, Any>>() {})
 
-        val result = client.get(
-            EP_INBOX,
-            mapOf("deviceId" to deviceId, "page" to page.toString(), "size" to size.toString()),
-            object : TypeToken<Map<String, Any>>() {},
-        )
-
-        return when (result) {
-            is ApiResult.Success -> {
-                try {
-                    val data = result.data
-                    val messagesJson = gson.toJson(data["data"])
-                    val messages: List<PushMessage> = gson.fromJson(messagesJson, object : TypeToken<List<PushMessage>>() {}.type)
-                    val pagination = data["pagination"] as? Map<*, *>
-                    val total = (pagination?.get("total") as? Number)?.toInt() ?: 0
-                    InboxResponse(messages, page, size, total, page * size < total)
-                } catch (e: Exception) {
-                    PushLogger.error(TAG, "인박스 파싱 실패: ${e.message}", e)
-                    InboxResponse(emptyList(), page, size, 0, false)
+            val response = when (result) {
+                is ApiResult.Success -> {
+                    try {
+                        val messagesJson = gson.toJson(result.data["data"])
+                        val messages: List<PushMessage> = gson.fromJson(messagesJson, object : TypeToken<List<PushMessage>>() {}.type)
+                        val pagination = result.data["pagination"] as? Map<*, *>
+                        val total = (pagination?.get("total") as? Number)?.toInt() ?: 0
+                        InboxResponse(messages, page, size, total, page * size < total)
+                    } catch (e: Exception) {
+                        PushLogger.error(TAG, "인박스 파싱 실패: ${e.message}", e)
+                        InboxResponse(emptyList(), page, size, 0, false)
+                    }
                 }
+                else -> InboxResponse(emptyList(), page, size, 0, false)
             }
-            is ApiResult.Error -> {
-                PushLogger.error(TAG, "인박스 조회 실패: ${result.message}")
-                InboxResponse(emptyList(), page, size, 0, false)
-            }
-            is ApiResult.NetworkError -> {
-                PushLogger.error(TAG, "인박스 네트워크 오류: ${result.exception.message}")
-                InboxResponse(emptyList(), page, size, 0, false)
-            }
+            mainHandler.post { callback(response) }
         }
     }
 
-    /**
-     * 메시지 상세를 조회한다.
-     */
-    suspend fun getMessageDetail(messageId: String): PushMessage? {
-        val client = httpClient ?: return null
-        val deviceId = getDeviceId()
+    fun getMessageDetail(messageId: String, callback: (PushMessage?) -> Unit) {
+        sdkScope.launch {
+            val client = httpClient ?: run {
+                mainHandler.post { callback(null) }
+                return@launch
+            }
+            val result = client.get("$EP_INBOX/$messageId", mapOf("deviceId" to getDeviceId()), object : TypeToken<Map<String, Any>>() {})
 
-        val result = client.get(
-            "$EP_INBOX/$messageId",
-            mapOf("deviceId" to deviceId),
-            object : TypeToken<Map<String, Any>>() {},
-        )
-
-        return when (result) {
-            is ApiResult.Success -> {
-                try {
-                    val dataJson = gson.toJson(result.data["data"])
-                    gson.fromJson(dataJson, PushMessage::class.java)
-                } catch (e: Exception) {
-                    PushLogger.error(TAG, "메시지 상세 파싱 실패: ${e.message}", e)
-                    null
+            val message = when (result) {
+                is ApiResult.Success -> {
+                    try {
+                        val dataJson = gson.toJson(result.data["data"])
+                        gson.fromJson(dataJson, PushMessage::class.java)
+                    } catch (e: Exception) {
+                        PushLogger.error(TAG, "메시지 상세 파싱 실패: ${e.message}", e)
+                        null
+                    }
                 }
+                else -> null
             }
-            else -> null
+            mainHandler.post { callback(message) }
         }
     }
 
-    /**
-     * 미열람 메시지 수를 조회한다.
-     */
-    suspend fun getBadgeCount(): Int {
-        val client = httpClient ?: return 0
-        val deviceId = getDeviceId()
-
-        val result = client.get(
-            EP_BADGE,
-            mapOf("deviceId" to deviceId),
-            object : TypeToken<Map<String, Any>>() {},
-        )
-
-        return when (result) {
-            is ApiResult.Success -> {
-                try {
-                    val data = result.data["data"] as? Map<*, *>
-                    (data?.get("count") as? Number)?.toInt() ?: 0
-                } catch (_: Exception) { 0 }
+    fun getBadgeCount(callback: (Int) -> Unit) {
+        sdkScope.launch {
+            val client = httpClient ?: run {
+                mainHandler.post { callback(0) }
+                return@launch
             }
-            else -> 0
+            val result = client.get(EP_BADGE, mapOf("deviceId" to getDeviceId()), object : TypeToken<Map<String, Any>>() {})
+
+            val count = when (result) {
+                is ApiResult.Success -> {
+                    try {
+                        val data = result.data["data"] as? Map<*, *>
+                        (data?.get("count") as? Number)?.toInt() ?: 0
+                    } catch (_: Exception) { 0 }
+                }
+                else -> 0
+            }
+            mainHandler.post { callback(count) }
         }
     }
 
-    // ── 로그아웃 ──
+    // ── 로그아웃 (fire-and-forget) ──
 
-    /**
-     * 로그아웃. disablePush=true이면 푸시 수신 비활성화.
-     */
-    suspend fun logout(disablePush: Boolean = false) {
-        if (disablePush) {
-            setAllowPush(false)
+    fun logout(disablePush: Boolean = false) {
+        sdkScope.launch {
+            if (disablePush) {
+                val client = httpClient ?: return@launch
+                client.post(EP_SETTINGS, mapOf("deviceId" to getDeviceId(), "enabled" to false), object : TypeToken<Map<String, Any>>() {})
+            }
+            val deviceId = getDeviceId()
+            prefs?.saveMemberNo(deviceId)
+            internalRegister(deviceId, compare = false)
+            PushLogger.info(TAG, "로그아웃 완료 (disablePush=$disablePush)")
         }
-
-        // memberNo를 UUID로 복원 (게스트 상태)
-        val deviceId = getDeviceId()
-        prefs?.saveMemberNo(deviceId)
-
-        // UUID로 재등록
-        internalRegister(deviceId, compare = false)
-
-        PushLogger.info(TAG, "로그아웃 완료 (disablePush=$disablePush)")
     }
 
     // ── 미확인 메시지 관리 ──
@@ -436,7 +341,7 @@ object PushSDK {
         sdkScope.launch {
             for (messageId in unconfirmed) {
                 try {
-                    sendReceiveConfirm(mapOf("messageId" to messageId))
+                    sendReceiveConfirmInternal(mapOf("messageId" to messageId))
                     removeUnconfirmed(messageId)
                 } catch (e: Exception) {
                     PushLogger.error(TAG, "미확인 메시지 복구 실패: $messageId", e)

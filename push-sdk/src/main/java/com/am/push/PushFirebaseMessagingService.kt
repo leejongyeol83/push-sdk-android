@@ -48,7 +48,7 @@ open class PushFirebaseMessagingService : FirebaseMessagingService() {
         // 비동기로 수신 확인 전송
         serviceScope.launch {
             try {
-                PushSDK.sendReceiveConfirm(data)
+                PushSDK.sendReceiveConfirmInternal(data)
                 PushSDK.removeUnconfirmed(message.messageId)
             } catch (e: Exception) {
                 PushLogger.error("FCM", "수신 확인 전송 실패: ${e.message}", e)
