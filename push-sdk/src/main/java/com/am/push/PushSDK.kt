@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
  * [setDeviceToken] + [register]로 디바이스를 등록한다.
  *
  * ```kotlin
- * val config = PushConfig(serverUrl = "https://...", apiKey = "pk_...")
+ * val config = PushConfig(apiKey = "pk_...", serverUrl = "https://...")
  * PushSDK.configure(context, config)
  * PushSDK.setDeviceToken(fcmToken)
  * PushSDK.register("user123")
@@ -77,7 +77,7 @@ object PushSDK {
         val serverUrl = tempPrefs.getSavedServerUrl() ?: return
         val apiKey = tempPrefs.getSavedApiKey() ?: return
 
-        configure(context, PushConfig(serverUrl = serverUrl, apiKey = apiKey))
+        configure(context, PushConfig(apiKey = apiKey, serverUrl = serverUrl))
         PushLogger.info(TAG, "SharedPreferences에서 설정 복원 완료")
     }
 
