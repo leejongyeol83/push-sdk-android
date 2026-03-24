@@ -8,7 +8,7 @@ package com.am.push
  * @property enableLogging 디버그 로그 활성화 여부
  */
 data class PushConfig(
-    val serverUrl: String,
     val apiKey: String,
+    val serverUrl: String,
     val enableLogging: Boolean = false,
 )
