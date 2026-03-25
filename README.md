@@ -76,47 +76,141 @@ class MyPushService : PushFirebaseMessagingService() {
 ```kotlin
 import com.am.push.PushSDK
 import com.am.push.PushConfig
+import com.am.push.LogLevel
+
+// ── 1. SDK 초기화 (Application.onCreate) ──
 
 class MyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // 1. SDK 초기화
         val config = PushConfig(
             apiKey = "pk_your_api_key",
             serverUrl = "https://your-platform.com",
-            enableLogging = true  // 디버그용
+            logLevel = LogLevel.DEBUG // NONE, ERROR, WARN, INFO, DEBUG
         )
         PushSDK.configure(this, config)
     }
 }
-```
 
-```kotlin
-// 2. FCM 토큰 설정 + 디바이스 등록
+// ── 2. FCM 토큰 설정 + 디바이스 등록 ──
+
 FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
     PushSDK.setDeviceToken(token)
-
-    // 비회원(UUID)으로 디바이스 등록 (스마트 비교: 변경 없으면 스킵)
-    PushSDK.register()
+    PushSDK.register()  // 비회원(UUID)으로 등록
 }
 
-// 3. 로그인 후 회원으로 전환
+// ── 3. 로그인 후 회원으로 전환 ──
+
 fun onLoginSuccess(userId: String) {
     PushSDK.register(userId)
 }
-```
 
-```kotlin
-// 3. 알림 클릭 처리
+// ── 4. 알림 클릭 처리 (Activity) ──
+
 override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    handlePushAction(intent)
+}
 
-    intent.getStringExtra(PushFirebaseMessagingService.EXTRA_MESSAGE_ID)?.let { messageId ->
-        PushSDK.open(messageId)
+override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    handlePushAction(intent)
+}
+
+private fun handlePushAction(intent: Intent) {
+    val messageId = intent.getStringExtra(PushFirebaseMessagingService.EXTRA_MESSAGE_ID)
+        ?: return
+
+    // 열람 확인
+    PushSDK.open(messageId)
+
+    // 동작 분기 (PushMessage.data에서 추출)
+    val actionType = intent.getStringExtra("push_action_type") ?: "0"
+    when (actionType) {
+        "1" -> {  // 웹 URL 이동
+            val webUrl = intent.getStringExtra("push_web_url")
+            webUrl?.let { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
+        }
+        "2" -> {  // 앱 화면 이동
+            val menuId = intent.getStringExtra("push_menu_id")
+            // 앱 내 화면 이동 처리
+        }
+        "3" -> {  // 팝업
+            val popupImgUrl = intent.getStringExtra("push_popup_img_url")
+            val popupUrl = intent.getStringExtra("push_popup_url")
+            // 팝업 표시 처리
+        }
     }
 }
 ```
+
+> **참고**: 알림 클릭 시 동작 정보를 Intent extras에 전달하려면 `getContentIntent()`를 오버라이드하세요:
+>
+> ```kotlin
+> class MyPushService : PushFirebaseMessagingService() {
+>     override fun getContentIntent(message: PushMessage): PendingIntent {
+>         val intent = packageManager.getLaunchIntentForPackage(packageName) ?: Intent()
+>         intent.putExtra(EXTRA_MESSAGE_ID, message.messageId)
+>         message.data?.let { data ->
+>             intent.putExtra("push_action_type", data["actionType"]?.toString() ?: "0")
+>             intent.putExtra("push_web_url", data["webUrl"]?.toString())
+>             intent.putExtra("push_menu_id", data["menuId"]?.toString())
+>             intent.putExtra("push_popup_img_url", data["popupImgUrl"]?.toString())
+>             intent.putExtra("push_popup_url", data["popupUrl"]?.toString())
+>         }
+>         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+>         return PendingIntent.getActivity(
+>             this, message.messageId.hashCode(), intent,
+>             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+>         )
+>     }
+> }
+> ```
+
+### Intro/Splash 화면이 있는 경우
+
+대부분의 앱은 런처 Activity가 `IntroActivity`(Splash)이고, 실제 푸시 처리는 `MainActivity`에서 합니다.
+앱이 완전히 꺼진 상태(Cold Start)에서 알림을 클릭하면 `IntroActivity`가 열리므로, **Intent extras를 Main으로 전달**해야 합니다.
+
+**방법 1: Intro에서 extras 전달 (권장)**
+
+```kotlin
+// IntroActivity.kt
+class IntroActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // 초기화 로직 (스플래시 등) ...
+
+        val mainIntent = Intent(this, MainActivity::class.java)
+        // 푸시 알림으로 진입한 경우 extras 전달
+        intent.extras?.let { mainIntent.putExtras(it) }
+        startActivity(mainIntent)
+        finish()
+    }
+}
+```
+
+**방법 2: getContentIntent() 오버라이드로 MainActivity 직접 지정**
+
+```kotlin
+class MyPushService : PushFirebaseMessagingService() {
+    override fun getContentIntent(message: PushMessage): PendingIntent {
+        // Intro를 건너뛰고 MainActivity로 직접 이동
+        val intent = Intent(this, MainActivity::class.java)
+        intent.putExtra(EXTRA_MESSAGE_ID, message.messageId)
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        return PendingIntent.getActivity(
+            this, message.messageId.hashCode(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+}
+```
+
+> **방법 1**은 Intro의 초기화 로직(로그인 체크 등)을 거치므로 안전합니다.
+> **방법 2**는 Intro를 건너뛰므로 초기화가 보장되는 경우에만 사용하세요.
 
 ## API
 
@@ -126,15 +220,15 @@ override fun onCreate(savedInstanceState: Bundle?) {
 |--------|-------------|
 | `PushSDK.configure(context, config)` | SDK 초기화 |
 | `PushSDK.setDeviceToken(token)` | FCM 토큰 설정 |
-| `PushSDK.register(memberNo?)` | 디바이스 등록 |
-| `PushSDK.restoreFromPreferences(context)` | FCM 수신 시 설정 복원 |
+| `PushSDK.register(userId?)` | 디바이스 등록 (userId 없으면 UUID) |
+| `PushSDK.restoreFromPreferences(context)` | FCM 수신 시 설정 복원 (자동 호출) |
 
 ### 알림 설정
 
 | Method | Description |
 |--------|-------------|
 | `PushSDK.setAllowPush(allow)` | 전체 푸시 수신 on/off |
-| `PushSDK.setDND(startTime, endTime)` | 방해금지 설정 (null이면 해제) |
+| `PushSDK.setDND(enabled, startTime?, endTime?)` | 방해금지 설정/해제 |
 | `PushSDK.setAllowType(messageTypeCode, enabled)` | 메시지 유형별 수신 허용/거부 |
 
 ### 수신/열람 확인
@@ -149,18 +243,37 @@ override fun onCreate(savedInstanceState: Bundle?) {
 
 | Method | Description |
 |--------|-------------|
-| `PushSDK.getInbox(page, size)` | 메시지함 조회 (페이지네이션) |
-| `PushSDK.getMessageDetail(messageId)` | 메시지 상세 조회 |
-| `PushSDK.getBadgeCount()` | 미열람 메시지 수 조회 |
+| `PushSDK.getInbox(page, size, callback)` | 메시지함 조회 (페이지네이션) |
+| `PushSDK.getMessageDetail(messageId, callback)` | 메시지 상세 조회 |
+| `PushSDK.getBadgeCount(callback)` | 미열람 메시지 수 조회 |
 
 ### 계정
 
 | Method | Description |
 |--------|-------------|
 | `PushSDK.logout(disablePush?)` | 로그아웃 (UUID로 복원) |
-| `PushSDK.getMemberNo()` | 저장된 memberNo 조회 |
+| `PushSDK.getUserId()` | 저장된 userId 조회 |
 | `PushSDK.getDeviceId()` | 디바이스 UUID 조회 |
 | `PushSDK.isConfigured` | 초기화 완료 여부 |
+
+## FCM Payload 구조
+
+서버에서 전송하는 FCM data payload:
+
+```json
+{
+  "appPush": "{\"messageId\":\"uuid\",\"title\":\"제목\",\"body\":\"내용\",\"imageUrl\":\"https://...\",\"actionType\":\"0\"}"
+}
+```
+
+### actionType 값
+
+| 값 | 동작 | 관련 필드 |
+|----|------|-----------|
+| `"0"` | 없음 (기본) | - |
+| `"1"` | 웹 URL 이동 | `webUrl` |
+| `"2"` | 앱 화면 이동 | `menuId` |
+| `"3"` | 팝업 | `popupImgUrl`, `popupUrl` (선택) |
 
 ## 미확인 메시지 자동 복구
 

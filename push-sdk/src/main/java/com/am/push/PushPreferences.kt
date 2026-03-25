@@ -7,7 +7,7 @@ import java.util.UUID
 /**
  * Push SDK 로컬 저장소 (SharedPreferences).
  *
- * 디바이스 토큰, memberNo, 등록 정보 등을 영속 저장한다.
+ * 디바이스 토큰, userId, 등록 정보 등을 영속 저장한다.
  */
 internal class PushPreferences(context: Context) {
 
@@ -15,7 +15,7 @@ internal class PushPreferences(context: Context) {
         private const val PREFS_NAME = "com.am.push.preferences"
         private const val KEY_DEVICE_TOKEN = "device_token"
         private const val KEY_DEVICE_ID = "device_id"
-        private const val KEY_MEMBER_NO = "member_no"
+        private const val KEY_USER_ID = "user_id"
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_SERVER_DEVICE_ID = "server_device_id"
@@ -36,8 +36,8 @@ internal class PushPreferences(context: Context) {
         return newId
     }
 
-    fun saveMemberNo(memberNo: String) { prefs.edit().putString(KEY_MEMBER_NO, memberNo).apply() }
-    fun getMemberNo(): String? = prefs.getString(KEY_MEMBER_NO, null)
+    fun saveUserId(userId: String) { prefs.edit().putString(KEY_USER_ID, userId).apply() }
+    fun getUserId(): String? = prefs.getString(KEY_USER_ID, null)
 
     fun saveConfig(serverUrl: String, apiKey: String) {
         prefs.edit().putString(KEY_SERVER_URL, serverUrl).putString(KEY_API_KEY, apiKey).apply()
@@ -61,7 +61,4 @@ internal class PushPreferences(context: Context) {
         set.remove(messageId)
         prefs.edit().putStringSet(KEY_UNCONFIRMED, set).apply()
     }
-    fun clearUnconfirmedMessages() { prefs.edit().remove(KEY_UNCONFIRMED).apply() }
-
-    fun clear() { prefs.edit().clear().apply() }
 }

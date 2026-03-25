@@ -45,13 +45,13 @@ open class PushFirebaseMessagingService : FirebaseMessagingService() {
         // 미확인 메시지 마크
         PushSDK.markUnconfirmed(message.messageId)
 
-        // 비동기로 수신 확인 전송
+        // 비동기로 수신 확인 전송 (파싱된 messageId 사용)
         serviceScope.launch {
             try {
-                PushSDK.sendReceiveConfirmInternal(data)
+                PushSDK.sendReceiveConfirmInternal(mapOf("messageId" to message.messageId))
                 PushSDK.removeUnconfirmed(message.messageId)
             } catch (e: Exception) {
-                PushLogger.error("FCM", "수신 확인 전송 실패: ${e.message}", e)
+                PushLogger.error("FCM", "[수신] 수신 확인 전송 실패: ${e.message}", e)
             }
         }
 
@@ -63,18 +63,12 @@ open class PushFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        PushLogger.info("FCM", "새 토큰 수신: ${token.take(10)}...")
+        PushLogger.info("FCM", "[초기화] 새 토큰 수신: ${token.take(10)}...")
 
         PushSDK.setDeviceToken(token)
 
         if (PushSDK.isConfigured) {
-            serviceScope.launch {
-                try {
-                    PushSDK.register()
-                } catch (e: Exception) {
-                    PushLogger.error("FCM", "토큰 갱신 후 재등록 실패: ${e.message}", e)
-                }
-            }
+            PushSDK.register()
         }
     }
 

@@ -1,7 +1,6 @@
 package com.am.push
 
 import com.google.gson.Gson
-import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 
 /**
@@ -26,19 +25,23 @@ data class PushMessage(
 
         /**
          * FCM data 맵에서 PushMessage를 생성한다.
+         * 서버는 `appPush` 키에 JSON 문자열로 페이로드를 전달한다.
          */
         fun fromFcmData(data: Map<String, String>): PushMessage? {
-            val messageId = data["messageId"] ?: return null
-            val title = data["title"]
-            val body = data["body"]
-            val imageUrl = data["imageUrl"]
-            val messageType = data["messageType"]
+            val appPushJson = data["appPush"] ?: return null
+            val parsed: Map<String, Any> = try {
+                gson.fromJson(appPushJson, object : TypeToken<Map<String, Any>>() {}.type)
+            } catch (_: Exception) { return null }
 
-            val customData: Map<String, Any>? = data["data"]?.let {
-                try {
-                    gson.fromJson(it, object : TypeToken<Map<String, Any>>() {}.type)
-                } catch (_: Exception) { null }
-            }
+            val messageId = parsed["messageId"] as? String ?: return null
+            val title = parsed["title"] as? String
+            val body = parsed["body"] as? String
+            val imageUrl = parsed["imageUrl"] as? String
+            val messageType = parsed["messageType"] as? String
+
+            // appPush 내 커스텀 데이터 (표준 필드 제외)
+            val standardKeys = setOf("messageId", "title", "body", "imageUrl", "messageType")
+            val customData = parsed.filterKeys { it !in standardKeys }.ifEmpty { null }
 
             return PushMessage(
                 messageId = messageId,
