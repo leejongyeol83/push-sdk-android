@@ -58,9 +58,11 @@ open class PushFirebaseMessagingService : FirebaseMessagingService() {
             }
         }
 
-        // 알림 표시 (Silent가 아닌 경우)
+        // 알림 표시 (Silent가 아닌 경우, 이미지 다운로드가 블로킹이므로 IO 스레드에서 실행)
         if (message.title != null || message.body != null) {
-            showNotification(message)
+            serviceScope.launch {
+                showNotification(message)
+            }
         }
     }
 

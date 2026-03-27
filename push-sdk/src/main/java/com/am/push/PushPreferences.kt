@@ -45,8 +45,6 @@ internal class PushPreferences(context: Context) {
     fun getSavedServerUrl(): String? = prefs.getString(KEY_SERVER_URL, null)
     fun getSavedApiKey(): String? = prefs.getString(KEY_API_KEY, null)
 
-
-
     fun saveServerDeviceId(id: String) { prefs.edit().putString(KEY_SERVER_DEVICE_ID, id).apply() }
     fun getServerDeviceId(): String? = prefs.getString(KEY_SERVER_DEVICE_ID, null)
 

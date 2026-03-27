@@ -41,7 +41,8 @@ data class PushMessage(
 
             // appPush 내 커스텀 데이터 (표준 필드 제외)
             val standardKeys = setOf("messageId", "title", "body", "imageUrl", "messageType")
-            val customData = parsed.filterKeys { it !in standardKeys }.ifEmpty { null }
+            val filtered = parsed.filterKeys { it !in standardKeys }
+            val customData = if (filtered.isEmpty()) null else filtered
 
             return PushMessage(
                 messageId = messageId,
