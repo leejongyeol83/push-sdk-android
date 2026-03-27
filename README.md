@@ -125,6 +125,17 @@ class MyPushService : PushFirebaseMessagingService() {
 }
 ```
 
+> **주의**: 오버라이드한 경우 AndroidManifest.xml에 SDK의 서비스 대신 **내 서비스를 등록**해야 합니다:
+> ```xml
+> <service
+>     android:name=".MyPushService"
+>     android:exported="false">
+>     <intent-filter>
+>         <action android:name="com.google.firebase.MESSAGING_EVENT" />
+>     </intent-filter>
+> </service>
+> ```
+
 ## Quick Start
 
 ```kotlin
