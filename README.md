@@ -277,6 +277,25 @@ class MyPushService : PushFirebaseMessagingService() {
 > **방법 1**은 Intro의 초기화 로직(로그인 체크 등)을 거치므로 안전합니다.
 > **방법 2**는 Intro를 건너뛰므로 초기화가 보장되는 경우에만 사용하세요.
 
+### MainActivity launchMode 설정 (필수)
+
+Intro → Main 구조에서 푸시 클릭 시 **MainActivity가 중복 생성**되는 문제가 발생할 수 있습니다.
+`AndroidManifest.xml`에서 `launchMode`를 설정하세요:
+
+```xml
+<activity
+    android:name=".MainActivity"
+    android:launchMode="singleTask" />
+```
+
+| launchMode | 동작 |
+|------------|------|
+| `singleTask` | 기존 인스턴스 재사용, `onNewIntent()`로 데이터 전달 (권장) |
+| `singleTop` | 최상단에 있을 때만 재사용, 백스택에 있으면 새로 생성 |
+| (미설정) | 항상 새 인스턴스 생성 → **중복 문제 발생** |
+
+> `singleTask` 설정 시 반드시 `onNewIntent()`에서도 푸시 데이터를 처리해야 합니다 (위 Quick Start 예제 참고).
+
 ## API
 
 ### 초기화
