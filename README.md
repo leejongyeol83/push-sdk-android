@@ -39,25 +39,79 @@ plugins {
 }
 ```
 
-3. 앱 `build.gradle.kts`에 플러그인 적용:
+3. 앱 `build.gradle.kts`에 플러그인 적용 + Firebase 라이브러리 추가:
 
 ```kotlin
 // app/build.gradle.kts
 plugins {
     id("com.google.gms.google-services")
 }
+
+dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
+}
 ```
 
-### 4. AndroidManifest.xml에 FCM 서비스 등록
+### 4. AndroidManifest.xml 설정
+
+알림 권한과 FCM 서비스를 등록합니다:
 
 ```xml
-<service
-    android:name="com.am.push.PushFirebaseMessagingService"
-    android:exported="false">
-    <intent-filter>
-        <action android:name="com.google.firebase.MESSAGING_EVENT" />
-    </intent-filter>
-</service>
+<manifest>
+    <!-- 알림 권한 (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <!-- FCM 서비스 -->
+        <service
+            android:name="com.am.push.PushFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
+```
+
+### 5. 알림 권한 요청 (Android 13+)
+
+Android 13(API 33) 이상에서는 알림 권한을 런타임에 요청해야 합니다:
+
+```kotlin
+// MainActivity.kt
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+
+class MainActivity : AppCompatActivity() {
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                // 권한 허용됨
+            } else {
+                // 권한 거부됨 — 설정 안내 등 처리
+            }
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        requestNotificationPermission()
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+}
 ```
 
 커스텀 알림이 필요하면 `PushFirebaseMessagingService`를 상속하세요:
